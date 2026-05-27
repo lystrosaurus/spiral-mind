@@ -1,0 +1,16 @@
+{
+  "name": "spiral-mind",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A TypeScript learning implementation of an agent harness.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "6.0.3"
+  }
+}
