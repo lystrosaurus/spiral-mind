@@ -21,10 +21,29 @@ Python。
 
 - `AgentLoop`：把 messages 发送给模型，执行工具调用，追加 `tool_result` blocks，
   并重复直到模型停止。
+- `AnthropicMessagesModel`：把本仓库内部的 `Message`、`ToolDefinition` 和
+  `ToolResultBlock` 转成 Anthropic Messages API 的请求格式。
 - `defineTool`：注册一个带名称和描述的原子工具 handler。
 - `PermissionPolicy`：在 handler 运行前检查请求的工具调用。
 - `Hooks`：暴露 `beforeToolUse` 和 `afterToolUse` 扩展点。
 - `MemoryModel`：用于测试和示例的确定性脚本模型。
+
+## 调试真实模型
+
+```powershell
+npm run debug:model -- "Use the bash tool to run pwd."
+```
+
+调试入口会读取项目根目录的本地 `.env`，支持：
+
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL`
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_MAX_TOKENS`
+
+`src/debug-model.ts` 故意只注册一个安全版 `bash` 工具，并通过权限策略限制命令范围。
+它的目标是观察模型调用、工具请求、工具结果回填和下一轮模型调用，而不是提供完整
+shell 能力。
 
 ## 下一步里程碑
 

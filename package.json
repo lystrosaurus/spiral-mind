@@ -6,6 +6,8 @@
   "description": "A TypeScript learning implementation of an agent harness.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "debug:config": "npm run build && node dist/src/debug-config.js",
+    "debug:model": "npm run build && node dist/src/debug-model.js",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

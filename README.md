@@ -16,10 +16,53 @@ npm install
 npm test
 ```
 
+## 调试真实模型调用
+
+设置 Anthropic API key 后，可以跑一个真实模型调试循环：
+
+```powershell
+npm run debug:model -- "Use the bash tool to run pwd, then explain the harness loop."
+```
+
+`npm run debug:model` 会自动读取项目根目录的本地 `.env`。仓库只提交
+[.env.example](.env.example) 作为格式参考；真实 `.env` 已被 `.gitignore` 排除。
+
+```env
+MODEL_PROVIDER=anthropic
+
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+ANTHROPIC_MAX_TOKENS=1024
+
+# OpenAI-compatible gateways:
+# MODEL_PROVIDER=openai
+# OPENAI_API_KEY=your-openai-compatible-key
+# OPENAI_MODEL=gpt-4o-mini
+# OPENAI_BASE_URL=https://api.openai.com
+# OPENAI_MAX_TOKENS=1024
+```
+
+先用这个命令确认本地 `.env` 是否生效，以及最终请求会发到哪里：
+
+```powershell
+npm run debug:config
+```
+
+这个命令会：
+
+- 调用 Anthropic Messages API；
+- 把 `messages` 和 `tools` 发给模型；
+- 允许模型调用一个安全版 `bash` 工具；
+- 打印 `beforeToolUse`、`afterToolUse`、最终 `stopReason` 和完整 transcript。
+
+安全版 `bash` 只允许 `pwd`、`ls`、`dir` 和 `echo <text>`，用来学习工具调用协议，不用来执行任意命令。
+
 当前实现范围：
 
 - [src/index.ts](src/index.ts)：核心 agent 循环、模型接口、工具定义、权限策略、
-  hook，以及测试用的 `MemoryModel`。
+  hook、Anthropic Messages API 适配器，以及测试用的 `MemoryModel`。
+- [src/debug-model.ts](src/debug-model.ts)：真实模型调用调试入口。
 - [test/agent-loop.test.ts](test/agent-loop.test.ts)：覆盖 s01 到 s04 基础机制的
   行为测试。
 

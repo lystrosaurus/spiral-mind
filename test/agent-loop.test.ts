@@ -139,3 +139,47 @@ test("fires pre and post tool hooks without changing the core loop", async () =>
 
   assert.deepEqual(events, ["before:echo", "after:echo:hooked"]);
 });
+
+test("fires a model response hook on each model turn", async () => {
+  const events: string[] = [];
+  const loop = new AgentLoop({
+    model: new MemoryModel([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "echo",
+            input: { text: "hooked" },
+          },
+        ],
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+      },
+    ]),
+    tools: [
+      defineTool({
+        name: "echo",
+        description: "Return the provided text.",
+        handler: async ({ text }) => String(text),
+      }),
+    ],
+    hooks: {
+      afterModelResponse: ({ iteration, response, messagesBefore }) => {
+        events.push(
+          `turn:${iteration}:before:${messagesBefore.length}:stop:${response.stopReason}`,
+        );
+      },
+    },
+  });
+
+  await loop.run([{ role: "user", content: "say hooked" }]);
+
+  assert.deepEqual(events, [
+    "turn:1:before:1:stop:tool_use",
+    "turn:2:before:3:stop:end_turn",
+  ]);
+});

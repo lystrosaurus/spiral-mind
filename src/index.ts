@@ -1,7 +1,13 @@
 export type Role = "user" | "assistant" | "system";
 
 // 模型结束本轮输出的原因。只有 tool_use 会让 harness 继续执行工具并回填结果。
-export type StopReason = "tool_use" | "end_turn" | "max_tokens" | "stop_sequence";
+export type StopReason =
+  | "tool_use"
+  | "end_turn"
+  | "max_tokens"
+  | "stop_sequence"
+  | "pause_turn"
+  | "refusal";
 
 export type TextBlock = {
   readonly type: "text";
@@ -9,6 +15,8 @@ export type TextBlock = {
 };
 
 export type ToolInput = Readonly<Record<string, unknown>>;
+
+export type JsonSchema = Readonly<Record<string, unknown>>;
 
 // 模型请求工具时输出的结构。handler 只通过 name 和 input 被路由。
 export type ToolUseBlock = {
@@ -54,6 +62,7 @@ export type ToolHandler = (
 export type ToolDefinition = {
   readonly name: string;
   readonly description: string;
+  readonly inputSchema?: JsonSchema;
   readonly handler: ToolHandler;
 };
 
@@ -83,7 +92,14 @@ export type ToolResultHookContext = ToolHookContext & {
   readonly result: ToolResultBlock;
 };
 
+export type ModelResponseHookContext = {
+  readonly iteration: number;
+  readonly response: ModelResponse;
+  readonly messagesBefore: readonly Message[];
+};
+
 export type Hooks = {
+  readonly afterModelResponse?: (context: ModelResponseHookContext) => Promise<void> | void;
   readonly beforeToolUse?: (context: ToolHookContext) => Promise<void> | void;
   readonly afterToolUse?: (context: ToolResultHookContext) => Promise<void> | void;
 };
@@ -150,6 +166,422 @@ export class MemoryModel implements Model {
   }
 }
 
+export type FetchLike = typeof fetch;
+
+async function readJsonResponse<T>(response: Response, label: string): Promise<T> {
+  const body = await response.text();
+
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    const contentType = response.headers.get("content-type") ?? "<missing content-type>";
+    throw new Error(
+      `${label} returned non-JSON response (${response.status}, ${contentType}): ${body.slice(
+        0,
+        300,
+      )}`,
+    );
+  }
+}
+
+export type AnthropicMessagesModelOptions = {
+  readonly apiKey: string;
+  readonly model: string;
+  readonly baseUrl?: string | undefined;
+  readonly system?: string | undefined;
+  readonly maxTokens?: number | undefined;
+  readonly anthropicVersion?: string | undefined;
+  readonly fetch?: FetchLike | undefined;
+};
+
+export function resolveAnthropicMessagesUrl(baseUrl: string): string {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  if (normalizedBaseUrl.endsWith("/v1/messages")) {
+    return normalizedBaseUrl;
+  }
+  if (normalizedBaseUrl.endsWith("/v1")) {
+    return `${normalizedBaseUrl}/messages`;
+  }
+  return `${normalizedBaseUrl}/v1/messages`;
+}
+
+export function resolveOpenAIChatCompletionsUrl(baseUrl: string): string {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  if (normalizedBaseUrl.endsWith("/v1/chat/completions")) {
+    return normalizedBaseUrl;
+  }
+  if (normalizedBaseUrl.endsWith("/v1")) {
+    return `${normalizedBaseUrl}/chat/completions`;
+  }
+  return `${normalizedBaseUrl}/v1/chat/completions`;
+}
+
+type AnthropicMessage = {
+  readonly role: "user" | "assistant";
+  readonly content: string | readonly Record<string, unknown>[];
+};
+
+type AnthropicRequestBody = {
+  model: string;
+  max_tokens: number;
+  messages: AnthropicMessage[];
+  tools: {
+    name: string;
+    description: string;
+    input_schema: JsonSchema;
+  }[];
+  system?: string;
+};
+
+type AnthropicResponseBody = {
+  readonly stop_reason: StopReason;
+  readonly content: readonly Record<string, unknown>[];
+  readonly error?: {
+    readonly message?: string;
+  };
+};
+
+export class AnthropicMessagesModel implements Model {
+  readonly #apiKey: string;
+  readonly #model: string;
+  readonly #baseUrl: string;
+  readonly #system: string | undefined;
+  readonly #maxTokens: number;
+  readonly #anthropicVersion: string;
+  readonly #fetch: FetchLike;
+
+  public constructor(options: AnthropicMessagesModelOptions) {
+    this.#apiKey = options.apiKey;
+    this.#model = options.model;
+    this.#baseUrl = options.baseUrl ?? "https://api.anthropic.com";
+    this.#system = options.system;
+    this.#maxTokens = options.maxTokens ?? 8000;
+    this.#anthropicVersion = options.anthropicVersion ?? "2023-06-01";
+    this.#fetch = options.fetch ?? fetch;
+  }
+
+  public async create(
+    messages: readonly Message[],
+    tools: readonly ToolDefinition[],
+  ): Promise<ModelResponse> {
+    const system = this.#buildSystem(messages);
+    const body: AnthropicRequestBody = {
+      model: this.#model,
+      max_tokens: this.#maxTokens,
+      messages: messages
+        .filter((message) => message.role !== "system")
+        .map((message) => this.#toAnthropicMessage(message)),
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.inputSchema ?? { type: "object", properties: {} },
+      })),
+    };
+    if (system) {
+      body.system = system;
+    }
+
+    const response = await this.#fetch(this.#messagesUrl(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": this.#apiKey,
+        "anthropic-version": this.#anthropicVersion,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const responseBody = await readJsonResponse<AnthropicResponseBody>(
+      response,
+      "Anthropic Messages API",
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Anthropic Messages API request failed (${response.status}): ${
+          responseBody.error?.message ?? response.statusText
+        }`,
+      );
+    }
+
+    return {
+      stopReason: responseBody.stop_reason,
+      content: responseBody.content.map((block) => this.#fromAnthropicBlock(block)),
+    };
+  }
+
+  #buildSystem(messages: readonly Message[]): string | undefined {
+    const systemMessages = messages
+      .filter((message) => message.role === "system")
+      .map((message) =>
+        typeof message.content === "string"
+          ? message.content
+          : message.content
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join("\n"),
+      )
+      .filter((content) => content.length > 0);
+
+    return [this.#system, ...systemMessages].filter(Boolean).join("\n\n") || undefined;
+  }
+
+  #messagesUrl(): string {
+    return resolveAnthropicMessagesUrl(this.#baseUrl);
+  }
+
+  #toAnthropicMessage(message: Message): AnthropicMessage {
+    if (message.role === "system") {
+      throw new Error("System messages are serialized through the top-level system field.");
+    }
+
+    return {
+      role: message.role,
+      content:
+        typeof message.content === "string"
+          ? message.content
+          : message.content.map((block) => this.#toAnthropicBlock(block)),
+    };
+  }
+
+  #toAnthropicBlock(block: ContentBlock): Record<string, unknown> {
+    switch (block.type) {
+      case "text":
+        return block;
+      case "tool_use":
+        return block;
+      case "tool_result":
+        return {
+          type: "tool_result",
+          tool_use_id: block.toolUseId,
+          content: block.content,
+        };
+    }
+  }
+
+  #fromAnthropicBlock(block: Record<string, unknown>): ContentBlock {
+    if (block.type === "text") {
+      return {
+        type: "text",
+        text: String(block.text ?? ""),
+      };
+    }
+
+    if (block.type === "tool_use") {
+      return {
+        type: "tool_use",
+        id: String(block.id),
+        name: String(block.name),
+        input: this.#asToolInput(block.input),
+      };
+    }
+
+    return {
+      type: "text",
+      text: JSON.stringify(block),
+    };
+  }
+
+  #asToolInput(value: unknown): ToolInput {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as ToolInput;
+    }
+    return {};
+  }
+}
+
+export type OpenAIChatCompletionsModelOptions = {
+  readonly apiKey: string;
+  readonly model: string;
+  readonly baseUrl?: string | undefined;
+  readonly maxTokens?: number | undefined;
+  readonly fetch?: FetchLike | undefined;
+};
+
+type OpenAIChatCompletionResponseBody = {
+  readonly choices?: readonly {
+    readonly finish_reason?: string | null;
+    readonly message?: {
+      readonly content?: string | null;
+      readonly tool_calls?: readonly {
+        readonly id?: string;
+        readonly type?: string;
+        readonly function?: {
+          readonly name?: string;
+          readonly arguments?: string;
+        };
+      }[];
+    };
+  }[];
+  readonly error?: {
+    readonly message?: string;
+  };
+};
+
+export class OpenAIChatCompletionsModel implements Model {
+  readonly #apiKey: string;
+  readonly #model: string;
+  readonly #baseUrl: string;
+  readonly #maxTokens: number;
+  readonly #fetch: FetchLike;
+
+  public constructor(options: OpenAIChatCompletionsModelOptions) {
+    this.#apiKey = options.apiKey;
+    this.#model = options.model;
+    this.#baseUrl = options.baseUrl ?? "https://api.openai.com";
+    this.#maxTokens = options.maxTokens ?? 1024;
+    this.#fetch = options.fetch ?? fetch;
+  }
+
+  public async create(
+    messages: readonly Message[],
+    tools: readonly ToolDefinition[],
+  ): Promise<ModelResponse> {
+    const response = await this.#fetch(resolveOpenAIChatCompletionsUrl(this.#baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.#apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.#model,
+        max_tokens: this.#maxTokens,
+        messages: this.#toOpenAIMessages(messages),
+        tools: tools.map((tool) => ({
+          type: "function",
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.inputSchema ?? { type: "object", properties: {} },
+          },
+        })),
+      }),
+    });
+
+    const responseBody = await readJsonResponse<OpenAIChatCompletionResponseBody>(
+      response,
+      "OpenAI-compatible chat completion API",
+    );
+    if (!response.ok) {
+      throw new Error(
+        `OpenAI-compatible chat completion request failed (${response.status}): ${
+          responseBody.error?.message ?? response.statusText
+        }`,
+      );
+    }
+
+    const choice = responseBody.choices?.[0];
+    if (!choice?.message) {
+      throw new Error("OpenAI-compatible response did not include choices[0].message.");
+    }
+
+    return this.#fromOpenAIChoice(choice);
+  }
+
+  #toOpenAIMessages(messages: readonly Message[]): Record<string, unknown>[] {
+    const mapped: Record<string, unknown>[] = [];
+
+    for (const message of messages) {
+      if (typeof message.content === "string") {
+        mapped.push({
+          role: message.role,
+          content: message.content,
+        });
+        continue;
+      }
+
+      const text = message.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      const toolUses = message.content.filter((block) => block.type === "tool_use");
+      const toolResults = message.content.filter((block) => block.type === "tool_result");
+
+      if (toolUses.length > 0) {
+        mapped.push({
+          role: "assistant",
+          content: text || null,
+          tool_calls: toolUses.map((block) => ({
+            id: block.id,
+            type: "function",
+            function: {
+              name: block.name,
+              arguments: JSON.stringify(block.input),
+            },
+          })),
+        });
+      } else if (text) {
+        mapped.push({
+          role: message.role,
+          content: text,
+        });
+      }
+
+      for (const block of toolResults) {
+        mapped.push({
+          role: "tool",
+          tool_call_id: block.toolUseId,
+          content: block.content,
+        });
+      }
+    }
+
+    return mapped;
+  }
+
+  #fromOpenAIChoice(choice: NonNullable<OpenAIChatCompletionResponseBody["choices"]>[number]): ModelResponse {
+    const content: ContentBlock[] = [];
+    const message = choice.message;
+
+    if (typeof message?.content === "string" && message.content.length > 0) {
+      content.push({
+        type: "text",
+        text: message.content,
+      });
+    }
+
+    for (const toolCall of message?.tool_calls ?? []) {
+      if (toolCall.function?.name) {
+        content.push({
+          type: "tool_use",
+          id: toolCall.id ?? `tool-call-${content.length + 1}`,
+          name: toolCall.function.name,
+          input: this.#parseToolArguments(toolCall.function.arguments ?? "{}"),
+        });
+      }
+    }
+
+    return {
+      stopReason: this.#stopReason(choice.finish_reason, content),
+      content,
+    };
+  }
+
+  #stopReason(reason: string | null | undefined, content: readonly ContentBlock[]): StopReason {
+    if (content.some((block) => block.type === "tool_use") || reason === "tool_calls") {
+      return "tool_use";
+    }
+    if (reason === "length") {
+      return "max_tokens";
+    }
+    if (reason === "content_filter") {
+      return "stop_sequence";
+    }
+    return "end_turn";
+  }
+
+  #parseToolArguments(value: string): ToolInput {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as ToolInput;
+      }
+    } catch {
+      return {};
+    }
+    return {};
+  }
+}
+
 export class AgentLoop {
   readonly #model: Model;
   readonly #tools: Map<string, ToolDefinition>;
@@ -176,7 +608,13 @@ export class AgentLoop {
 
     // 这是整个 harness 的主循环：问模型、记录响应、必要时执行工具、再问模型。
     for (let iteration = 0; iteration < this.#maxIterations; iteration += 1) {
+      const messagesBefore = [...messages];
       const response = await this.#model.create(messages, tools);
+      await this.#hooks.afterModelResponse?.({
+        iteration: iteration + 1,
+        response,
+        messagesBefore,
+      });
       messages.push({ role: "assistant", content: response.content });
 
       // 不是 tool_use 就表示模型本轮不再要求 harness 行动，直接把 transcript 返回。
