@@ -23,7 +23,7 @@ import { existsSync } from "node:fs";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { loadDotEnvFile } from "./env.js";
+import { findDotEnvFile, loadDotEnvFile } from "./env.js";
 import { resolveAnthropicMessagesUrl, resolveOpenAIChatCompletionsUrl } from "./index.js";
 
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
@@ -54,12 +54,16 @@ function maskSecret(value: string | undefined): string {
 }
 
 async function main(): Promise<void> {
-  const envPath = ".env";
+  // 向上查找 .env：IDEA 调试时 cwd 往往是 dist/src，只认相对路径会找不到
+  const envPath = findDotEnvFile() ?? ".env";
   // 把 .env 加载进 process.env
   await loadDotEnvFile(envPath);
 
   const provider = process.env.MODEL_PROVIDER ?? "anthropic";
 
+  // 打印 cwd 和解析到的 .env 路径，方便排查"IDE 里读不到配置"的问题
+  console.log(`process.cwd(): ${process.cwd()}`);
+  console.log(`.env resolved path: ${envPath}`);
   console.log(`.env present: ${existsSync(envPath)}`);
   console.log(`MODEL_PROVIDER: ${provider}`);
 

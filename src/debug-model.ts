@@ -40,7 +40,7 @@ import {
 // 上面 import 里的 type 关键字：表示"这个符号只用作类型，运行时不存在"。
 // 编译时会被完全擦除，不会出现在最终 .js 里。
 
-import { loadDotEnvFile } from "./env.js";
+import { findDotEnvFile, loadDotEnvFile } from "./env.js";
 
 const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
@@ -208,8 +208,15 @@ function summarizeContent(content: readonly ContentBlock[]): string {
  * CLI 入口主函数。
  */
 async function main(): Promise<void> {
-  // 第一步：把 .env 里的环境变量加载进 process.env
-  await loadDotEnvFile();
+  // 第一步：把 .env 里的环境变量加载进 process.env。
+  // 用 findDotEnvFile 向上查找，避免 IDEA 调试时 cwd 不是工程根目录导致找不到。
+  const envPath = findDotEnvFile();
+  if (envPath) {
+    console.log(`.env: ${envPath}`);
+    await loadDotEnvFile(envPath);
+  } else {
+    console.log(".env: not found (falling back to process environment only)");
+  }
 
   // 模型供应商：anthropic（默认）或 openai
   const provider = process.env.MODEL_PROVIDER ?? "anthropic";

@@ -18,7 +18,9 @@
  * ============================================================================
  */
 
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { dirname, join, parse, resolve } from "node:path";
 
 /** key-value 形式的环境变量集合（值一定是字符串） */
 export type EnvMap = Record<string, string>;
@@ -105,6 +107,42 @@ export function applyDotEnv(
     if (override || target[key] === undefined) {
       target[key] = value;
     }
+  }
+}
+
+/**
+ * 从 startDirectory 开始逐级向上查找 .env，返回第一个命中的绝对路径。
+ *
+ * 为什么要向上找，而不是只认 process.cwd()？
+ * 因为 cwd 会随启动方式变化：
+ *   - 在终端里 `npm run debug:model` → cwd 是工程根目录
+ *   - 在 IDEA 里点 Debug 运行 Node.js 配置 → cwd 常常是脚本所在目录
+ *     （例如 dist/src），此时相对路径 ".env" 就找不到工程根目录的 .env，
+ *     而 loadDotEnvFile 对"文件不存在"是静默跳过的，表现就是"配置没生效"。
+ *
+ * 向上查找后，无论从工程根目录还是 dist/src 启动，都能定位到同一份 .env。
+ *
+ * @param startDirectory 起始目录，默认 process.cwd()
+ * @returns .env 的绝对路径；一路到盘符根都没有则返回 undefined
+ */
+export function findDotEnvFile(startDirectory: string = process.cwd()): string | undefined {
+  // resolve 把相对路径补成绝对路径，避免 dirname 循环时路径形态不一致
+  let currentDirectory = resolve(startDirectory);
+  // parse("C:\\AI\\spiral-mind").root 是 "C:\\"；Linux 下是 "/"
+  const { root } = parse(currentDirectory);
+
+  for (;;) {
+    const candidate = join(currentDirectory, ".env");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    // 到达盘符根目录仍然没找到，说明整条路径上都没有 .env
+    if (currentDirectory === root) {
+      return undefined;
+    }
+
+    currentDirectory = dirname(currentDirectory);
   }
 }
 

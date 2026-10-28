@@ -251,6 +251,7 @@ TypeScript 的 `readonly` 只是编译期检查。**调试器里可以直接修�
 | 断点显示为空心（灰色） | IDEA 没识别到 source map 或编译产物比源码旧 | 重新 `npm run build`，确认 `dist/**/*.map` 文件存在 |
 | 断在 `.js` 里而不是 `.ts` 里 | source map 被 IDEA 忽略 | File → Project Structure → Modules → 勾上 "Enable JavaScript support" 或 "TypeScript Language Service" |
 | 跑到一半报 ENOENT: .env 找不到 | debug:model 需要 .env 文件 | 跑 debug:model 之前先跑 debug:config 确认 .env 存在 |
+| IDEA 调试时 `.env` 像没生效（终端里却正常） | IDEA 的 working directory 常是脚本所在目录（`dist/src`），相对路径 `.env` 找不到，而缺失是静默跳过 | 已修复：`findDotEnvFile` 会从 cwd 逐级向上找 `.env`；先跑 `debug:config` 看 `.env resolved path` 是否指向工程根目录 |
 | Windows 下路径变成 `/C:/...` 炸掉 | pathToFileURL 转换时 URL 编码不一致 | 这个是 IDEA 历史 bug，升级到 2025.x |
 | 测试在 Debug 里跑但 Console 输出空白 | node:test 的输出被 IDEA 吞了 | 在 Node parameters 里加 `--test-reporter spec` |
 

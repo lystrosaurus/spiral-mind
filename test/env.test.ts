@@ -11,10 +11,13 @@
  * ============================================================================
  */
 
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyDotEnv, parseDotEnv } from "../src/env.js";
+import { applyDotEnv, findDotEnvFile, parseDotEnv } from "../src/env.js";
 
 /**
  * 基础解析：KEY=VALUE 行被识别，# 开头的注释和空行被忽略。
@@ -106,4 +109,45 @@ test("applyDotEnv can preserve existing process environment values", () => {
     // 已有值保留
     ANTHROPIC_BASE_URL: "https://from-shell.example.test",
   });
+});
+
+/**
+ * findDotEnvFile 会从起始目录逐级向上找 .env。
+ *
+ * 场景复现：IDEA 调试时 cwd 是 dist/src，工程根目录的 .env 需要向上两级才能找到。
+ * 这里用临时目录搭出 root/dist/src 三层结构来验证。
+ */
+test("findDotEnvFile walks up from a nested directory", async () => {
+  // mkdtemp 在系统临时目录下创建一个唯一的新目录，避免污染工作区
+  const root = await mkdtemp(join(tmpdir(), "spiral-mind-env-"));
+  const nested = join(root, "dist", "src");
+  await mkdir(nested, { recursive: true });
+  await writeFile(join(root, ".env"), "A=1\n", "utf8");
+
+  try {
+    assert.equal(findDotEnvFile(nested), join(root, ".env"));
+    // 从根目录本身开始查找也应命中
+    assert.equal(findDotEnvFile(root), join(root, ".env"));
+  } finally {
+    // finally 保证断言失败时临时目录也会被清理
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 临时目录里没有 .env 时返回 undefined（走到盘符根仍未命中）。
+ *
+ * 注意：如果系统盘符根目录下恰好有 .env 文件，这个测试会失败——
+ * 那属于极端的机器环境问题，正常机器不会有。
+ */
+test("findDotEnvFile returns undefined when no .env exists on the path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "spiral-mind-empty-"));
+  const nested = join(root, "a", "b");
+  await mkdir(nested, { recursive: true });
+
+  try {
+    assert.equal(findDotEnvFile(nested), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
