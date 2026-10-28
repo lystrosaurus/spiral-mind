@@ -1,7 +1,10 @@
 # 学习路线图
 
-这份路线图跟随 `shareAI-lab/learn-claude-code` 当前的 20 课主线。检查日期为
-2026-05-26，检查来源是当前工作区环境。
+这份路线图跟随 `shareAI-lab/learn-claude-code` 当前的 **17 课主线**
+（`s01_agent_loop` 到 `s17_goal_loop`）。检查日期 2026-10-28。
+
+> 上一次检查（2026-05-26）时上游还是 20 课。这次发现上游已将 20 课收敛为 17 课，
+> 详细合并去向见 [sources.md](./sources.md) 的 "Legacy 20 课 → Current 17 课 合并去向"。
 
 ## 你在学习什么
 
@@ -28,36 +31,58 @@
 不要丢掉这条主线。后续每一种机制都是挂载在这个循环周围的附加层，而不是替代这个
 循环。
 
-## 章节地图
+## 章节地图（Current 17 课主线）
 
-| 章节 | 机制 | 需要理解什么 | 建议本地练习 |
-|---|---|---|---|
-| s01 | Agent 循环 | `messages[]`、`while True`、`stop_reason` | 写一个 fake model 循环，调用一个命令 handler。 |
-| s02 | 工具调用 | tool schemas、`TOOL_HANDLERS`、dispatch maps | 添加 `read_file`、`write_file`、`edit_file` handler。 |
-| s03 | 权限系统 | 允许、拒绝、需要审批的动作 | dispatch 前增加路径和命令检查。 |
-| s04 | Hook 系统 | 工具调用前后的扩展点 | 不改核心循环，通过 hook 记录每次工具调用。 |
-| s05 | TodoWrite | 先计划再执行，以及进度跟踪 | 构建一个带状态的内存 todo list。 |
-| s06 | Subagent | 用新的 `messages[]` 隔离旁路工作 | 运行一个只返回摘要的子循环。 |
-| s07 | Skill 加载 | 先列出知识，再按需展开 | 只在选中时加载本地 Markdown skill。 |
-| s08 | 上下文压缩 | snipping、micro compaction、auto compaction | token 预算超限时总结旧消息。 |
-| s09 | 记忆系统 | 选择、提取、合并 | 将稳定事实与原始 transcript 分开持久化。 |
-| s10 | 系统提示词 | 运行时组装 prompt | 从命名 section 组合 system prompt。 |
-| s11 | 错误恢复 | retry、fallback、token escalation | 给错误分类，并选择重试路径。 |
-| s12 | 任务系统 | 持久任务和依赖关系 | 将任务以 JSON 存储，并支持 `blockedBy` 依赖。 |
-| s13 | 后台任务 | 在线程中运行慢任务 | 启动命令，并在之后轮询通知。 |
-| s14 | Cron 调度器 | 按时间触发工作 | 持久化计划任务，并在到期时触发。 |
-| s15 | Agent 团队 | 队友和异步 mailbox | 通过 JSONL inbox 发送 request/reply 消息。 |
-| s16 | 团队协议 | 固定协作模式 | 实现计划评审和关闭握手协议。 |
-| s17 | 自主 Agent | 空闲扫描和自我认领任务 | 让 agent 用锁认领未分配任务。 |
-| s18 | Worktree 隔离 | 一个任务，一个目录 | 将 task ID 绑定到隔离工作目录。 |
-| s19 | MCP 插件 | 外部能力路由 | 将外部工具规范化进同一个工具池。 |
-| s20 | 综合 Agent | 所有机制，一个循环 | 解释每个 manager 如何挂到循环周围。 |
+| 章节 | 机制 | 需要理解什么 | 建议本地练习 | 核心口号 |
+|---|---|---|---|---|
+| s01 | Agent Loop | `messages[]`、`while True`、`stop_reason` | 写一个 fake model 循环，调用一个命令 handler。 | One loop & Bash is all you need |
+| s02 | Tool Use | tool schemas、`TOOL_HANDLERS`、dispatch map | 添加 `read_file`、`write_file`、`edit_file` handler。 | Adding a tool means adding one handler |
+| s03 | Permission System | 允许、拒绝、需要审批的动作 | dispatch 前增加路径和命令检查。 | Set boundaries first, then grant freedom |
+| s04 | Hook System | 工具调用前后的扩展点 | 不改核心循环，通过 hook 记录每次工具调用。 | Hook around the loop, never rewrite the loop |
+| s05 | TodoWrite | 先计划再执行，以及进度跟踪 | 构建一个带状态的内存 todo list。 | An agent without a plan drifts |
+| s06 | Subagent | 用新的 `messages[]` 隔离旁路工作 | 运行一个只返回摘要的子循环。 | 给子任务一份新的 messages[] |
+| s07 | Skill Loading | 先列出知识，再按需展开 | 只在选中时加载本地 Markdown skill。 | Load knowledge on demand, not upfront |
+| s08 | Context Compact | tool_result_budget / snip_compact / micro_compact / compact_history | token 预算超限时先丢 tool_result、再总结历史。 | Context always fills up — have a way to make room |
+| s09 | Memory System | 选择、提取、合并 | 将稳定事实与原始 transcript 分开持久化。 | Remember what matters, forget what doesn't |
+| s10 | Task System | 磁盘持久化、`blockedBy` 依赖图 | 将任务以 JSON 存储，并支持 `blockedBy` 依赖。 | Big goals break into small tasks, ordered, persisted to disk |
+| s11 | Background Tasks | 线程执行 + 通知队列 | 启动命令，并在之后轮询通知。 | Slow ops go background, agent keeps thinking |
+| s12 | Cron Scheduler | 持久化计划任务 + session 内触发器 | 按时间自动触发工作。 | Fire on schedule, no human kick needed |
+| s13 | Agent Teams | 持久队友、原子任务认领、task-bound worktrees、typed protocols | 通过 JSONL inbox 发送 request/reply 消息。 | Too big for one agent — let teammates divide the work |
+| s14 | MCP Plugin | 工具发现、命名空间、工具池组装 | 把外部 MCP 工具规范化进同一个工具池。 | Not enough capability? Plug in more via MCP |
+| s15 | Integrated Harness | tools + runtime context + tasks + teams + scheduling + MCP 围绕一个循环 | 解释每个 manager 如何挂到循环周围。 | Many mechanisms, one loop |
+| s16 | Workflow Runtime | 脚本编排、生命周期事件、journal 恢复 | 把固定编排写成脚本，出故障能从 journal 续跑。 | When the orchestration shape is fixed, put it in code |
+| s17 | Goal Loop | goal gate、对话评估、自动续跑 | 让独立评估器决定 loop 是否真的可以 stop。 | A goal decides when the loop may stop |
+
+### 章节分组
+
+按依赖关系和复杂度分 5 个阶段：
+
+```
+阶段 1：核心循环（s01–s04）
+  s01 Agent Loop → s02 Tool Use → s03 Permission → s04 Hooks
+
+阶段 2：复杂工作管理（s05–s07）
+  s05 TodoWrite → s06 Subagent → s07 Skill Loading
+
+阶段 3：上下文与记忆（s08–s09）
+  s08 Context Compact → s09 Memory System
+
+阶段 4：持久化与长任务（s10–s12）
+  s10 Task System → s11 Background Tasks → s12 Cron Scheduler
+
+阶段 5：协作、扩展与收尾（s13–s17）
+  s13 Agent Teams → s14 MCP → s15 Integrated → s16 Workflow → s17 Goal Loop
+```
+
+注意：s10 以前的"系统提示词"和"错误恢复"两章已被吸收。系统提示词现在属于
+runtime context（s15）的一部分；错误恢复分散在 compaction（s08）、
+后台任务清理（s11）等各处。
 
 ## 四周学习计划
 
-### 第 1 周：核心循环和边界
+### 第 1 周：核心循环和边界（s01–s04）
 
-阅读 s01-s04，在本地构建最小 harness。
+阅读 s01-s04，在本地构建最小 harness。（本仓库当前已实现这 4 章。）
 
 你应该能回答：
 
@@ -66,9 +91,9 @@
 - 哪些动作应该允许、拒绝或要求审批？
 - hook 可以挂在哪里，而不需要重写核心循环？
 
-### 第 2 周：复杂工作和上下文
+### 第 2 周：复杂工作和知识管理（s05–s09）
 
-阅读 s05-s08，加入计划、subagent、skill 和压缩机制。
+阅读 s05-s09，加入计划、subagent、skill、压缩和记忆机制。
 
 你应该能回答：
 
@@ -76,30 +101,29 @@
 - 新的子 `messages[]` 解决了什么问题？
 - 为什么知识应该通过 tool result 加载，而不是塞进 system prompt？
 - 压缩之后哪些信息必须保留下来？
+- 记忆系统的选择/提取/合并三个子系统分别做什么？
 
-### 第 3 周：记忆、恢复和长任务
+### 第 3 周：持久化和长任务（s10–s12）
 
-阅读 s09-s14，加入持久化和长时间运行能力。
+阅读 s10-s12，加入磁盘持久化、后台执行和定时调度。
 
 你应该能回答：
 
-- 什么应该变成 memory，什么应该留在 transcript history 中？
-- system prompt 如何在运行时组装？
-- 哪些错误应该重试、升级或放弃？
 - 持久任务和内存 todo 有什么不同？
 - 后台执行如何通知主循环？
+- Cron 任务如何在 session 结束后仍然存活？
 
-### 第 4 周：多 Agent 协作和扩展
+### 第 4 周：协作、扩展和收尾（s13–s17）
 
-阅读 s15-s20，重点理解协调、隔离和能力扩展。
+阅读 s13-s17，重点理解协调、隔离、能力扩展、脚本编排和目标控制。
 
 你应该能回答：
 
 - mailbox message 中应该包含什么？
 - 为什么团队需要明确协议？
-- 自主 agent 如何避免认领同一个任务？
-- 为什么 worktree 对并行 coding agent 很重要？
 - MCP 如何成为另一种工具来源，而不是一套独立控制流？
+- Workflow Runtime 的 journal 恢复和普通 task 重试有什么不同？
+- Goal Loop 的独立评估器解决了什么问题？
 
 ## 学习规则
 
@@ -111,4 +135,4 @@
 4. 故意把它弄坏一次。
 5. 把故障模式写进笔记。
 
-如果你只运行上游代码，你会“认识”这个机制。只有自己重建一遍，你才会真正理解它。
+如果你只运行上游代码，你会"认识"这个机制。只有自己重建一遍，你才会真正理解它。
