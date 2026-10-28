@@ -10,6 +10,7 @@
     "noImplicitOverride": true,
     "rootDir": ".",
     "outDir": "dist",
+    "sourceMap": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
