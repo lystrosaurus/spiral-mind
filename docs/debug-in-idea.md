@@ -49,6 +49,21 @@ source map 是编译时生成的"回译本"——IDE 跑 `.js` 时，断点会�
 
 4. 选 **Apply → OK**
 
+> ⚠️ **JavaScript file 必须填 `dist/` 下的 `.js`，不能填 `test/*.test.ts`。**
+>
+> 直接跑 TS 源码会报：
+>
+> ```text
+> Error [ERR_MODULE_NOT_FOUND]: Cannot find module 'C:\AI\spiral-mind\src\index.js'
+> imported from C:\AI\spiral-mind\test\agent-loop.test.ts
+> ```
+>
+> 原因：TS 源码里写 `from "../src/index.js"` 是 ESM 的规范要求（编译后路径才成立），
+> 但源码目录里只有 `src/index.ts`，没有 `src/index.js`。Node 不会自动把 `.js`
+> 解析成 `.ts`，所以必须在编译后的 `dist/` 上运行。
+>
+> 改配置前记得先 `npm run build`，保证 `dist/` 是最新的。
+
 #### 下断点
 
 打开 [src/index.ts](../src/index.ts)，在下面几处点左边行标：
@@ -232,6 +247,7 @@ TypeScript 的 `readonly` 只是编译期检查。**调试器里可以直接修�
 
 | 症状 | 原因 | 解决 |
 |---|---|---|
+| `ERR_MODULE_NOT_FOUND: Cannot find module '...\src\index.js'` | Run Configuration 指向了 `.ts` 源文件 | JavaScript file 改成 `dist/test/agent-loop.test.js`（或对应 `dist/src/*.js`），并先 `npm run build` |
 | 断点显示为空心（灰色） | IDEA 没识别到 source map 或编译产物比源码旧 | 重新 `npm run build`，确认 `dist/**/*.map` 文件存在 |
 | 断在 `.js` 里而不是 `.ts` 里 | source map 被 IDEA 忽略 | File → Project Structure → Modules → 勾上 "Enable JavaScript support" 或 "TypeScript Language Service" |
 | 跑到一半报 ENOENT: .env 找不到 | debug:model 需要 .env 文件 | 跑 debug:model 之前先跑 debug:config 确认 .env 存在 |
